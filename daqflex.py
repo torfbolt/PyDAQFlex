@@ -5,7 +5,32 @@ Created on 04.04.2013
 '''
 # pylint: disable=C0103
 
-import usb, array, struct, codecs
+import usb, array, struct, codecs, collections
+from threading import Thread, Event
+
+
+class PollingThread(Thread):
+    def __init__(self, endpoint, data_buf, packet_size, rate):
+        super(PollingThread, self).__init__()
+        self.endpoint = endpoint
+        self._packet_size = packet_size
+        self.data_buffer = data_buf
+        self.rate = rate
+        self.shutdown = Event()
+        self.new_data = Event()
+    def run(self):
+        timeout = int(self._packet_size * 1e3 / 2 / self.rate) + 10
+        while not self.shutdown.is_set():
+            try:
+                packet = self.endpoint.read(self._packet_size, timeout)
+            except usb.core.USBError:
+                pass
+            if (len(packet) == 0):
+                break
+            self.data_buffer.append(struct.unpack(
+                "=" + "H" * (len(packet) / 2), packet))
+            self.new_data.set()
+
 
 class MCCDevice(object):
     '''
@@ -20,7 +45,7 @@ class MCCDevice(object):
         Constructor
         '''
         if self.id_product is None:
-            raise ValueError('idProduct not defined')
+            raise ValueError('id_product not defined')
         # find our device
         if serial_number is None:
             self.dev = usb.core.find(idVendor=self.id_vendor,
@@ -39,6 +64,8 @@ class MCCDevice(object):
         self._ep_in = self.__get_bulk_endpoint(usb.util.ENDPOINT_IN)
         self._ep_out = self.__get_bulk_endpoint(usb.util.ENDPOINT_OUT)
         self._bulk_packet_size = self._ep_in.wMaxPacketSize
+        self._polling_thread = None
+        self.data_buffer = None
 
     def send_message(self, message):
         '''
@@ -84,11 +111,28 @@ class MCCDevice(object):
             if len(packet) == 0:
                 break
 
-    def start_continuous_transfer(self, rate, mcc_buf, samps, delay):
-        pass
+    def start_continuous_transfer(self, rate, buf_size, packet_size=None):
+        if packet_size is None:
+            packet_size = (rate // 1000 + 1) * 64
+        self.data_buffer = collections.deque(maxlen=buf_size)
+        self._polling_thread = PollingThread(self._ep_in,
+            self.data_buffer, packet_size, rate)
+        self._polling_thread.start()
 
     def stop_continuous_transfer(self):
-        pass
+        if self._polling_thread is not None:
+            self._polling_thread.shutdown.set()
+            self._polling_thread.join(1)
+            self._polling_thread = None
+
+    def get_new_bulk_data(self, wait=False):
+        if wait:
+            self._polling_thread.new_data.wait()
+        data = []
+        while self.data_buffer:
+            data.extend(self.data_buffer.popleft())
+        self._polling_thread.new_data.clear()
+        return data
 
     def get_calib_data(self, channel):
         slope = float(self.send_message("?AI{{{0}}}:SLOPE".format(channel)).
