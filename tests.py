@@ -26,7 +26,6 @@ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 '''
 
-
 import unittest
 import time
 from numpy import array
@@ -52,10 +51,13 @@ class Test_USB_204(unittest.TestCase):
                                 "No return value for " + cmd)
 
     def test_calibrate_data(self):
+        '''
+        Test if data calibration works.
+        '''
         raw = [0, 2047.5, 0x0FFF]
         truth = [-10.0, 0.0, 10.0]
         self.assertItemsEqual(self.dev.scale_and_calibrate_data(array(raw),
-            - 10, 10, 1, 0), truth)
+            - 10, 10, (1, 0)), truth)
 
     def test_ai_scan_block_pulses(self):
         '''
@@ -63,33 +65,44 @@ class Test_USB_204(unittest.TestCase):
         via read_scan_data(), while a test signal is generated on DIO0.
         For this test, DIO0 has to be wired to analog input CH0.
         '''
+        t_start = time.time()
+        t_x = 0.1
+        pulses = 10
         for spl in [100, 1000, 10000]:
             self.dev.send_message("DIO{0/0}:DIR=OUT")
             self.dev.send_message("AISCAN:LOWCHAN=0")
             self.dev.send_message("AISCAN:HIGHCHAN=0")
             self.dev.send_message("AISCAN:SAMPLES={0}".format(spl))
-            self.dev.send_message("AISCAN:RATE={0}".format(spl * 10))
+            self.dev.send_message("AISCAN:RATE={0}".format(spl / t_x))
             self.dev.send_message("AISCAN:XFRMODE=BLOCKIO")
+            self.dev.flush_input_data()
+            self.dev.send_message("AISCAN:START")
+            # test readout while sampling
+            dat = self.dev.read_scan_data(spl, spl / t_x)
             self.dev.flush_input_data()
             self.dev.send_message("AISCAN:START")
             t_0 = time.time()
             # output pulses to DIO0
-            for pulse in range(10):
-                while (time.time() < t_0 + 0.01 * (pulse + 0.25)):
-                    pass
+            for pulse in range(pulses):
+                while (time.time() < t_0 + t_x / pulses * (pulse + 0.25)):
+                    time.sleep(1e-4)
                 self.dev.send_message("DIO{0/0}:VALUE=1")
-                while (time.time() < t_0 + 0.01 * (pulse + 0.75)):
-                    pass
+                while (time.time() < t_0 + t_x / pulses * (pulse + 0.75)):
+                    time.sleep(1e-4)
                 self.dev.send_message("DIO{0/0}:VALUE=0")
-            dat = self.dev.read_scan_data(spl, spl * 10)
+            # readout after sampling
+            dat = self.dev.read_scan_data(spl, spl / t_x)
             self.dev.send_message("DIO{0/0}:DIR=IN")
-            slope, offset = self.dev.get_calib_data(0)
+            calib = self.dev.get_calib_data(0)
             dat = self.dev.scale_and_calibrate_data(array(dat), -10, 10,
-                                                    slope, offset)
-            self.assertTrue(all([-0.5 < dat[i * spl / 10] < 0.5
-                                 for i in range(10)]), "Incorrect low values")
-            self.assertTrue(all([4.5 < dat[i * spl / 10 + spl / 20] < 5.5
-                                 for i in range(10)]), "Incorrect high values")
+                                                    calib)
+            self.assertEqual(len(dat), spl, "Incorrect number of values")
+            self.assertTrue(all([-0.5 < dat[i * spl / pulses] < 0.5
+                for i in range(pulses)]), "Incorrect low values")
+            self.assertTrue(all([4.5 < dat[i * spl / pulses +
+                                           spl / (2 * pulses)] < 5.5
+                for i in range(pulses)]), "Incorrect high values")
+        self.assertLess(time.time(), t_start + 1.5, "Test took too much time")
 
     def test_ai_scan_continuous_pulses(self):
         '''
@@ -97,41 +110,47 @@ class Test_USB_204(unittest.TestCase):
         while a test signal is generated on DIO0.
         For this test, DIO0 has to be wired to analog input CH0.
         '''
-        for spl in [50, 500, 5000, 50000]:
+        t_start = time.time()
+        t_x = 0.25
+        pulses = 10
+        for spl in [100, 1000, 10000, 100000]:
             self.dev.send_message("DIO{0/0}:DIR=OUT")
             self.dev.send_message("AISCAN:LOWCHAN=0")
             self.dev.send_message("AISCAN:HIGHCHAN=0")
             self.dev.send_message("AISCAN:SAMPLES=0")
-            self.dev.send_message("AISCAN:RATE={0}".format(spl * 10))
+            self.dev.send_message("AISCAN:RATE={0}".format(spl / t_x))
             self.dev.send_message("AISCAN:XFRMODE=BLOCKIO")
             self.dev.flush_input_data()
             dat = []
-            self.dev.send_message("AISCAN:START")
+            self.dev.start_continuous_transfer(int(spl / t_x), 100)
             t_0 = time.time()
-            self.dev.start_continuous_transfer(spl * 10, 10)#// 5)
+            self.dev.send_message("AISCAN:START")
             # output pulses to DIO0
-            for pulse in range(10):
-                while (time.time() < t_0 + 0.01 * (pulse + 0.25)):
-                    pass
+            for pulse in range(pulses):
+                while (time.time() < t_0 + t_x / pulses * (pulse + 1.25)):
+                    time.sleep(1e-4)
                 self.dev.send_message("DIO{0/0}:VALUE=1")
-                while (time.time() < t_0 + 0.01 * (pulse + 0.75)):
-                    pass
+                while (time.time() < t_0 + t_x / pulses * (pulse + 1.75)):
+                    time.sleep(1e-4)
                 self.dev.send_message("DIO{0/0}:VALUE=0")
                 dat.extend(self.dev.get_new_bulk_data())
-            while (time.time() < t_0 + 0.2):
-                pass
+            while (time.time() < t_0 + t_x * 1.2):
+                time.sleep(1e-4)
             self.dev.stop_continuous_transfer()
             self.dev.send_message("AISCAN:STOP")
             dat.extend(self.dev.get_new_bulk_data())
             self.dev.send_message("DIO{0/0}:DIR=IN")
-            slope, offset = self.dev.get_calib_data(0)
+            calib = self.dev.get_calib_data(0)
             dat = self.dev.scale_and_calibrate_data(array(dat), -10, 10,
-                                                    slope, offset)
-            self.assertTrue(all([-0.5 < dat[i * spl / 10] < 0.5
-                                 for i in range(10)]), "Incorrect low values")
-            self.assertTrue(all([4.5 < dat[i * spl / 10 + spl / 20] < 5.5
-                                 for i in range(10)]), "Incorrect high values")
-
+                                                    calib)
+            self.assertGreaterEqual(len(dat), spl,
+                                    "Insufficient number of values")
+            self.assertTrue(all([-0.5 < dat[(i + 1) * spl / pulses] < 0.5
+                for i in range(pulses)]), "Incorrect low values")
+            self.assertTrue(all([4.5 < dat[(i + 1) * spl / pulses +
+                                           spl / (2 * pulses)] < 5.5
+                for i in range(pulses)]), "Incorrect high values")
+        self.assertLess(time.time(), t_start + 1.5, "Test took too much time")
 
 suite = unittest.TestLoader().loadTestsFromTestCase(Test_USB_204)
 unittest.TextTestRunner(verbosity=2).run(suite)

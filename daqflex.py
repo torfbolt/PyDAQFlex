@@ -28,11 +28,12 @@ POSSIBILITY OF SUCH DAMAGE.
 '''
 # pylint: disable=C0103
 
-import usb, array, struct, codecs, collections
+import usb, errno, array, codecs, collections
 from threading import Thread, Event
 
 
 class PollingThread(Thread):
+    '''Thread for asynchronous, continuous data retrieval.'''
     def __init__(self, endpoint, data_buf, packet_size, rate):
         super(PollingThread, self).__init__()
         self.endpoint = endpoint
@@ -44,28 +45,38 @@ class PollingThread(Thread):
     def run(self):
         timeout = int(self._packet_size * 1e3 / 2 / self.rate) + 10
         while not self.shutdown.is_set():
+            packet = None
             try:
                 packet = self.endpoint.read(self._packet_size, timeout)
-            except usb.core.USBError:
-                pass
-            if (len(packet) == 0):
+            except usb.core.USBError as err:
+                if err.errno != errno.ETIMEDOUT:
+                    raise err
+            if (packet is None) or (len(packet) == 0):
                 break
-            self.data_buffer.append(struct.unpack(
-                "=" + "H" * (len(packet) / 2), packet))
+            # convert to uint16 and put whole packet into buffer
+            data = array.array("H")
+            data.fromstring(packet)
+            self.data_buffer.append(data)
+            # notify listeners of new data
             self.new_data.set()
 
 
 class MCCDevice(object):
+
     '''
     Base class for a MCC USB device.
     '''
+
     id_vendor = 0x09db
     id_product = None
     max_counts = None
 
+
     def __init__(self, serial_number=None):
         '''
-        Constructor
+        Connect to a device with a given product id and serial number.
+        :param serial_number: serial number of the device to connect to
+        (default = None, use the first device regardless of serial number)
         '''
         if self.id_product is None:
             raise ValueError('id_product not defined')
@@ -97,15 +108,16 @@ class MCCDevice(object):
         :param message: the command string to send
         '''
         try:
-            assert self.dev.ctrl_transfer(usb.TYPE_VENDOR + usb.ENDPOINT_OUT,
-                0x80, 0, 0, message.upper().encode('ascii')) == len(message)
+            assert self.dev.ctrl_transfer(usb.TYPE_VENDOR +
+                usb.ENDPOINT_OUT, 0x80, 0, 0,
+                message.upper().encode('ascii')) == len(message)
         except AssertionError:
             raise IOError("Could not send message")
         except usb.core.USBError:
             raise IOError("Send failed, possibly wrong command?")
         ret = self.dev.ctrl_transfer(usb.TYPE_VENDOR + usb.ENDPOINT_IN,
                                      0x80, 0, 0, 64)
-        return codecs.decode(ret, 'ascii').rstrip('\0')
+        return codecs.decode(ret, 'ascii').rstrip(chr(0))
 
     def read_scan_data(self, length, rate):
         '''
@@ -114,18 +126,23 @@ class MCCDevice(object):
         :param rate: the sample rate of the AISCAN command in Hz
         '''
         timeout = int(self._bulk_packet_size * 1e3 / 2 / rate) + 10
-        data = array.array('B')
+        data = array.array('H')
         while (True):
+            packet = None
             try:
                 packet = self._ep_in.read(self._bulk_packet_size, timeout)
-            except usb.core.USBError:
-                pass
-            data.extend(packet)
-            if (len(packet) == 0) or (len(data) > length * 2):
+            except usb.core.USBError as err:
+                if err.errno != errno.ETIMEDOUT:
+                    raise err
+            if (packet is None) or (len(packet) == 0):
                 break
-        return struct.unpack("=" + "H" * (len(data) / 2), data)[:length]
+            data.fromstring(packet)
+            if len(data) >= length:
+                break
+        return data
 
     def flush_input_data(self):
+        '''Read and discard all remaining data from the bulk input.'''
         while (True):
             try:
                 packet = self._ep_in.read(self._bulk_packet_size, 20)
@@ -135,6 +152,13 @@ class MCCDevice(object):
                 break
 
     def start_continuous_transfer(self, rate, buf_size, packet_size=None):
+        '''
+        Start an asynchronous data transfer to read AISCAN values.
+        :param rate: the sample rate of the AISCAN command in Hz
+        :param buf_size: the maximum number of data packets in the buffer
+        :param packet_size: the size of a data packet in bytes
+        (default = None, automatic determination based on rate)
+        '''
         if packet_size is None:
             packet_size = (rate // 1000 + 1) * 64
         self.data_buffer = collections.deque(maxlen=buf_size)
@@ -143,35 +167,58 @@ class MCCDevice(object):
         self._polling_thread.start()
 
     def stop_continuous_transfer(self):
+        '''
+        Stop the asynchronous data transfer and wait for the data collection
+        to finish.
+        '''
         if self._polling_thread is not None:
             self._polling_thread.shutdown.set()
-            self._polling_thread.join(1)
+            self._polling_thread.join()
             self._polling_thread = None
 
     def get_new_bulk_data(self, wait=False):
-        if wait:
+        '''
+        Return all continuous transfer data in the buffer.
+        :param wait: if True, block until new data is available
+        '''
+        if wait and self._polling_thread is not None:
             self._polling_thread.new_data.wait()
-        data = []
+        data = array.array("H")
         while self.data_buffer:
             data.extend(self.data_buffer.popleft())
-        self._polling_thread.new_data.clear()
+        if self._polling_thread is not None:
+            self._polling_thread.new_data.clear()
         return data
 
     def get_calib_data(self, channel):
+        '''
+        Query the calibration parameters slope and offset for a given channel.
+        The returned values are only valid for the currently selected
+        voltage range.
+        :param channel: the analog input channel to calibrate
+        '''
         slope = float(self.send_message("?AI{{{0}}}:SLOPE".format(channel)).
                       split('=')[1])
         offset = float(self.send_message("?AI{{{0}}}:OFFSET".format(channel)).
                        split('=')[1])
         return slope, offset
 
-    def scale_and_calibrate_data(self, data, min_voltage, max_voltage,
-                                 slope, offset):
+    def scale_and_calibrate_data(self, data, min_voltage, max_voltage, calib):
+        '''
+        Apply scaling and calibration to calculate voltages from raw data.
+        :param data: the raw data (number or numpy array)
+        :param min_voltage: selected minimum voltage of the AI channel
+        :param max_voltage: selected maximum voltage of the AI channel
+        :param calib: calibration slope and offset as a tuple
+        (see get_calib_data)
+        '''
+        slope, offset = calib
         full_scale = max_voltage - min_voltage
         cal_data = data * float(slope) + offset
         return (cal_data / self.max_counts) * full_scale + min_voltage
 
     def __get_interface(self):
-        '''Get the USB interface descriptor'''
+        '''Get the USB interface descriptor.'''
         cfg = self.dev.get_active_configuration()
         intf_number = cfg[(0, 0)].bInterfaceNumber
         alternate_setting = usb.control.get_interface(self.dev, intf_number)
@@ -180,7 +227,7 @@ class MCCDevice(object):
 
     def __get_bulk_endpoint(self, direction):
         '''
-        Get the USB endpoint for bulk read or write
+        Get the USB endpoint for bulk read or write.
         :param direction: ENDPOINT_IN or ENDPOINT_OUT
         '''
         def ep_match(endp):
