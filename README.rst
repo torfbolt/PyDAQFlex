@@ -12,6 +12,17 @@ on all operating systems supported by PyUSB.
 PyUSB is currently tested on Windows and Linux,
 but should also work on OS X and OpenBSD using libusbx.
 
+*Disclaimer*: PyDAQFlex is NOT in any way affiliated with Measurement Computing or the official
+DAQFlex framework.
+
+Status
+======
+
+PyDAQFlex does not (yet) provide all the features of DAQFlex and was
+only tested on the following devices:
+
+* USB-204
+
 Installation
 ============
 
