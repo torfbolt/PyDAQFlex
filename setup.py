@@ -9,7 +9,7 @@ setup(
     description='Python port of the Measurement Computing DAQFlex framework',
     author='David Kiliani',
     author_email='mail@davidkiliani.de',
-    #url='http://',
+    url='https://github.com/torfbolt/PyDAQFlex',
     py_modules=['daqflex'],
     long_description=open('README.rst', 'rt').read(),
     classifiers=[
