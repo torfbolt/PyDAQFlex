@@ -11,8 +11,7 @@ setup(
     author_email='mail@davidkiliani.de',
     #url='http://',
     py_modules=['daqflex'],
-    long_description="""
-    """,
+    long_description=open('README.rst', 'rt').read(),
     classifiers=[
         "License :: OSI Approved :: BSD License",
         "Programming Language :: Python",
