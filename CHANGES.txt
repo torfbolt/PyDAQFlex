@@ -1,0 +1,4 @@
+v0.2.2, 2013-04-11 -- Initial release.
+
+v0.3.0, 2014-06-07 -- Added support for USB-1608G series devices.
+                      Restructured package tree to fit binary resources.

@@ -1,0 +1,2 @@
+include *.txt
+include RELEASE-VERSION gitversion.py
