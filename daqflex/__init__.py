@@ -29,8 +29,9 @@ POSSIBILITY OF SUCH DAMAGE.
 # pylint: disable=C0103
 
 import usb, errno, array, codecs, collections
+import pkg_resources
+import time
 from threading import Thread, Event
-
 
 class PollingThread(Thread):
     '''Thread for asynchronous, continuous data retrieval.'''
@@ -70,6 +71,7 @@ class MCCDevice(object):
     id_vendor = 0x09db
     id_product = None
     max_counts = None
+    fpga_image = None
 
 
     def __init__(self, serial_number=None):
@@ -100,6 +102,26 @@ class MCCDevice(object):
         self._bulk_packet_size = self._ep_in.wMaxPacketSize
         self._polling_thread = None
         self.data_buffer = None
+        # does this model require FPGA firmware loading?
+        if self.fpga_image:
+            # Check FPGA configuration status
+            ret = self.send_message('?DEV:FPGACFG')
+            if ret == 'DEV:FPGACFG=CONFIGMODE':
+                # FPGA has not yet been loaded
+                # Send FW upload unlock code 0xAD
+                self.send_message('DEV:FPGACFG=0xAD')
+                # retrieve FPGA image from Python package
+                rbf = pkg_resources.resource_string(__name__, self.fpga_image)
+                # transmit image 64 bytes at a time using command 0x51
+                for i in range(0, len(rbf), 64):
+                    msg = rbf[i:i+64]
+                    self.dev.ctrl_transfer(usb.TYPE_VENDOR + usb.ENDPOINT_OUT, 0x51, 0, 0, msg)
+                # a minimum pause seems to be necessary after sending the firmware
+                time.sleep(0.25)
+            ret = self.send_message('?DEV:FPGACFG')
+            if ret != 'DEV:FPGACFG=CONFIGURED':
+                raise IOError("Could not configure FPGA")
+
 
     def send_message(self, message):
         '''
@@ -107,6 +129,10 @@ class MCCDevice(object):
         and return the device response.
         :param message: the command string to send
         '''
+
+        # Some devices (e.g. USB-1608G series) expect a null-terminated string
+        message += '\0'
+
         try:
             assert self.dev.ctrl_transfer(usb.TYPE_VENDOR +
                 usb.ENDPOINT_OUT, 0x80, 0, 0,
@@ -259,6 +285,7 @@ class USB_1608FS_Plus(MCCDevice):
 
 class USB_1608G(MCCDevice):
     '''USB-1608G card'''
+    fpga_image = 'firmware/USB_1608G.rbf'
     max_counts = 0xFFFF
     id_product = 0x0110
 

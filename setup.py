@@ -1,16 +1,17 @@
 #!/usr/bin/env python
 
 from setuptools import setup
-from version import get_git_version
+from gitversion import get_version
 
 setup(
     name='pydaqflex',
-    version=get_git_version(),
+    version=get_version(),
     description='Python port of the Measurement Computing DAQFlex framework',
     author='David Kiliani',
     author_email='mail@davidkiliani.de',
     url='https://github.com/torfbolt/PyDAQFlex',
-    py_modules=['daqflex'],
+    packages=['daqflex'],
+    package_data={'daqflex': ['firmware/*.rbf']},
     long_description=open('README.rst', 'rt').read(),
     classifiers=[
         "License :: OSI Approved :: BSD License",

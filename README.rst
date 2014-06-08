@@ -22,6 +22,7 @@ PyDAQFlex does not (yet) provide all the features of DAQFlex and was
 only tested on the following devices:
 
 * USB-204
+* USB-1608GX-2AO
 
 Installation
 ============
