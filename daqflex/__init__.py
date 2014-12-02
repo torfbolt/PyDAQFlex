@@ -99,7 +99,8 @@ class MCCDevice(object):
         self._intf = self.__get_interface()
         self._ep_in = self.__get_bulk_endpoint(usb.util.ENDPOINT_IN)
         self._ep_out = self.__get_bulk_endpoint(usb.util.ENDPOINT_OUT)
-        self._bulk_packet_size = self._ep_in.wMaxPacketSize
+        if self._ep_in:
+            self._bulk_packet_size = self._ep_in.wMaxPacketSize
         self._polling_thread = None
         self.data_buffer = None
         # does this model require FPGA firmware loading?
