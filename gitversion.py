@@ -211,7 +211,7 @@ def run_git(*args, **kwargs):
 
 def get_cached_version():
     try:
-        with file(VERSION_CACHE) as f:
+        with open(VERSION_CACHE) as f:
             return f.read().strip()
     except IOError as ex:
         if ex.errno == errno.ENOENT:
@@ -219,8 +219,8 @@ def get_cached_version():
         raise
 
 def set_cached_version(version):
-    with file(VERSION_CACHE, "w") as f:
+    with open(VERSION_CACHE, "w") as f:
         return f.write(version + "\n")
 
 if __name__ == "__main__":
-    print get_version()
+    print(get_version())
