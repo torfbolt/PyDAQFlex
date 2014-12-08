@@ -123,9 +123,9 @@ class MCCDevice(object):
 
     @classmethod
     def find_serial_numbers(cls):
-      '''Return list of serial numbers of attached devices.'''
-      return [d.serial_number for d in usb.core.find(
-              idVendor=cls.id_vendor, idProduct=cls.id_product, find_all=True)]
+        '''Return list of serial numbers of attached devices.'''
+        return [d.serial_number for d in usb.core.find(
+            idVendor=cls.id_vendor, idProduct=cls.id_product, find_all=True)]
 
     def send_message(self, message):
         '''
