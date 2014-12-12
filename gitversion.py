@@ -74,12 +74,15 @@ __all__ = ("get_version")
 # Name of file in which the version number is cached
 VERSION_CACHE = 'RELEASE-VERSION'
 
+
 class GitError(Exception):
     pass
+
 
 class GitNotFound(GitError):
     """ The ``git`` command was not found.
     """
+
 
 class GitFailed(GitError):
     def __str__(self):
@@ -101,7 +104,7 @@ class GitFailed(GitError):
         return self.args[2]
 
 
-GIT_DESCRIPION_re = re.compile(
+GIT_DESCRIPTION_re = re.compile(
     r'''\A \s*
         (?P<release>.*?)
         (?:
@@ -113,6 +116,7 @@ GIT_DESCRIPION_re = re.compile(
 
 # Valid PEP440 release versions
 RELEASE_VERSION_re = re.compile(r'\A\d+(\.\d+)*((?:a|b|c|rc)\d+)?\Z')
+
 
 def get_version(**kwargs):
     """ Calculate a valid PEP440 version number based on git history.
@@ -137,6 +141,7 @@ def get_version(**kwargs):
     if cached_version != git_version:
         set_cached_version(git_version)
     return git_version
+
 
 def get_git_version(**kwargs):
     if not os.path.isdir('.git'):
@@ -163,7 +168,7 @@ def get_git_version(**kwargs):
         return '0.dev%d' % get_number_of_commits_in_head(**kwargs)
 
     output = ''.join(output).strip()
-    m = GIT_DESCRIPION_re.match(output)
+    m = GIT_DESCRIPTION_re.match(output)
     if not m:
         raise GitError(
             "can not parse the output of git describe (%r)" % output)
@@ -181,6 +186,7 @@ def get_git_version(**kwargs):
         version += '.post%d' % post
     return version
 
+
 def get_number_of_commits_in_head(**kwargs):
     try:
         return len(run_git('rev-list', 'HEAD', **kwargs))
@@ -189,13 +195,15 @@ def get_number_of_commits_in_head(**kwargs):
             raise
         return 0
 
+
 def run_git(*args, **kwargs):
     git_cmd = kwargs.get('git_cmd', 'git')
     cwd = kwargs.get('cwd')
     cmd = (git_cmd,) + args
     stderr = TemporaryFile()
     try:
-        proc = Popen(cmd, stdout=PIPE, stderr=stderr, cwd=cwd)
+        proc = Popen(cmd, stdout=PIPE, stderr=stderr, cwd=cwd,
+                     universal_newlines=True)
     except OSError as ex:
         if ex.errno == errno.ENOENT:
             raise GitNotFound("%r not found in PATH" % git_cmd)
@@ -208,7 +216,6 @@ def run_git(*args, **kwargs):
     return output
 
 
-
 def get_cached_version():
     try:
         with open(VERSION_CACHE) as f:
@@ -217,6 +224,7 @@ def get_cached_version():
         if ex.errno == errno.ENOENT:
             return None
         raise
+
 
 def set_cached_version(version):
     with open(VERSION_CACHE, "w") as f:

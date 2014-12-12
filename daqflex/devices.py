@@ -36,7 +36,7 @@ import collections
 import pkg_resources
 import time
 import usb
-from utils import PollingThread
+from .utils import PollingThread
 
 
 class MCCDevice(object):

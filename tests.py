@@ -30,7 +30,6 @@ POSSIBILITY OF SUCH DAMAGE.
 import unittest
 import time
 from numpy import array
-
 import daqflex
 
 
