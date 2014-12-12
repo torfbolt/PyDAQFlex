@@ -87,11 +87,9 @@ class MCCDevice(object):
             self.dev = usb.core.find(idVendor=self.id_vendor,
                                      idProduct=self.id_product)
         else:
-            dev_list = usb.core.find(idVendor=self.id_vendor,
-                idProduct=self.id_product, find_all=True)
-            dev_list = [d for d in dev_list if usb.util.get_string(d,
-                256, d.iSerialNumber) == serial_number]
-            self.dev = dev_list[0] if dev_list else None
+            self.dev = usb.core.find(idVendor=self.id_vendor,
+                                     idProduct=self.id_product,
+                                     serial_number=serial_number)
         # was it found?
         if self.dev is None:
             raise ValueError('Device not found')
@@ -123,6 +121,11 @@ class MCCDevice(object):
             if ret != 'DEV:FPGACFG=CONFIGURED':
                 raise IOError("Could not configure FPGA")
 
+    @classmethod
+    def find_serial_numbers(cls):
+        '''Return list of serial numbers of attached devices.'''
+        return [d.serial_number for d in usb.core.find(
+            idVendor=cls.id_vendor, idProduct=cls.id_product, find_all=True)]
 
     def send_message(self, message):
         '''
